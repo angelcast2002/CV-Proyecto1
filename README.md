@@ -13,7 +13,6 @@
 
 ## 1. Implementación de Algoritmos de Binarización
 
-_(Esta sección se deja vacía según la solicitud)_
 
 ---
 
