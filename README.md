@@ -13,6 +13,19 @@
 
 ## 1. Implementación de Algoritmos de Binarización
 
+ - Otsu + Ecualización:
+Se implementó el método de umbralización global de Otsu, precedido de una ecualización de histograma para mejorar el contraste. Aunque este método es sencillo y rápido, sus resultados fueron pobres en este conjunto de datos, con baja precisión y F1 Score.
+
+- Sauvola:
+Se utilizó la técnica de umbralización local basada en el método de Sauvola, que calcula el umbral de cada píxel a partir de la media y desviación estándar de una ventana local. Este método presentó un alto accuracy y specificity, pero el recall y el F1 Score fueron moderados, indicando que se pierden algunas regiones de interés.
+
+ - Umbralización Adaptativa:
+Se implementó una versión manual de umbralización adaptativa, en la que cada píxel se clasifica comparándolo con la media local de un bloque específico. Este enfoque logró un recall muy alto, reflejando una buena detección de las estructuras, aunque la precisión se vio limitada debido a la presencia de falsos positivos.
+
+ - Filtros de Gabor + Red Neuronal:
+Se desarrolló una arquitectura que combina filtros de Gabor predefinidos para la extracción de características con una red neuronal convolucional para la segmentación. A pesar de ser el método más complejo y demandante en términos computacionales, se obtuvieron los mejores resultados en accuracy y precisión, ofreciendo un balance óptimo entre detección de la estructura arterial y minimización de falsos positivos.
+
+En resumen, cada algoritmo aporta ventajas y limitaciones específicas: mientras que la umbralización adaptativa destaca por su alto recall, la combinación de filtros de Gabor con una red neuronal se posiciona como la opción más robusta y precisa, a pesar de requerir mayores recursos computacionales. Este análisis permite identificar alternativas según las necesidades y limitaciones del entorno de implementación.
 
 ---
 
