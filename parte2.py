@@ -1,377 +1,314 @@
-import cv2
-import numpy as np
 import os
 import json
-
+import cv2
+import numpy as np
+import networkx as nx
+import matplotlib.pyplot as plt
 from skimage.morphology import skeletonize
+from sklearn.cluster import DBSCAN
 
-###################################
-# Parámetros globales ajustables
-###################################
-UMBRAL_ENDPOINT = 1
-UMBRAL_BIFURCACION = 3
-UMBRAL_TRIFURCACION = 4
+# Parámetros ajustables
+EPSILON_DBSCAN = 5         # radio en píxeles para fusionar nodos cercanos
+RDP_EPSILON = 2            # tolerancia para la simplificación de trayectorias con RDP
+INPUT_DIR = 'datos/etiquetas'
+OUTPUT_JSON_DIR = 'output/json'
+OUTPUT_IMG_DIR = 'output/imagenes'
 
-# Umbral de ángulo (en grados) para decidir cuándo crear un nodo intermedio
-# por curvatura. Ejemplo: 30 grados
-UMBRAL_CURVATURA = 47.0
+# Aseguramos que existan los directorios de salida
+os.makedirs(OUTPUT_JSON_DIR, exist_ok=True)
+os.makedirs(OUTPUT_IMG_DIR, exist_ok=True)
 
-###################################
-# Funciones auxiliares
-###################################
-
-def load_image(path):
-    """Lee la imagen en escala de grises y la binariza."""
-    img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        raise ValueError(f"No se pudo cargar la imagen: {path}")
-    _, bin_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
-    return bin_img
-
-def skeletonize_image(bin_img):
-    """Convierte la imagen binaria a booleano y la esqueletiza con skimage."""
-    bool_img = (bin_img > 0)
-    skel = skeletonize(bool_img)
-    return skel
-
-def get_neighbors_8(x, y, rows, cols):
-    """Devuelve los vecinos en 8 direcciones de (x, y) dentro de los límites."""
-    for dx in [-1, 0, 1]:
-        for dy in [-1, 0, 1]:
-            if dx == 0 and dy == 0:
-                continue
-            nx_, ny_ = x + dx, y + dy
-            if 0 <= nx_ < rows and 0 <= ny_ < cols:
-                yield nx_, ny_
-
-def count_neighbors(skel, x, y):
-    """Cuenta cuántos vecinos (8-conectividad) están activos en skel[x, y]."""
-    cnt = 0
-    for nx_, ny_ in get_neighbors_8(x, y, *skel.shape):
-        if skel[nx_, ny_]:
-            cnt += 1
-    return cnt
-
-def detect_main_nodes(skel):
+def rdp(points, epsilon):
     """
-    Detecta nodos principales (endpoint, bifurcacion, trifurcacion) basados
-    en la cantidad de vecinos. Devuelve un diccionario:
-      (x, y) -> 'endpoint' | 'bifurcacion' | 'trifurcacion'
+    Implementación recursiva del algoritmo Ramer-Douglas-Peucker.
+    points: lista de puntos [ [row, col], ... ]
+    epsilon: tolerancia (en píxeles)
+    Devuelve una lista simplificada de puntos.
     """
+    if len(points) < 3:
+        return points
+
+    def point_line_distance(point, start, end):
+        if np.allclose(start, end):
+            return np.linalg.norm(np.array(point) - np.array(start))
+        else:
+            num = abs((end[1] - start[1])*(start[0] - point[0]) - 
+                      (start[1] - point[1])*(end[0] - start[0]))
+            den = np.linalg.norm(np.array(end) - np.array(start))
+            return num / den
+
+    start, end = points[0], points[-1]
+    dmax = 0
+    index = 0
+    for i in range(1, len(points)-1):
+        d = point_line_distance(points[i], start, end)
+        if d > dmax:
+            index = i
+            dmax = d
+
+    if dmax >= epsilon:
+        rec_results1 = rdp(points[:index+1], epsilon)
+        rec_results2 = rdp(points[index:], epsilon)
+        return rec_results1[:-1] + rec_results2
+    else:
+        return [start, end]
+
+def build_skeleton_graph(skel):
+    """
+    Construye un grafo (usando networkx) a partir de la imagen esqueletizada.
+    Cada píxel True se agrega como nodo (con coordenadas (row, col))
+    y se conectan con sus vecinos (8-conectividad).
+    """
+    G = nx.Graph()
     rows, cols = skel.shape
-    main_nodes = {}
-    for x in range(rows):
-        for y in range(cols):
-            if skel[x, y]:
-                n_vec = count_neighbors(skel, x, y)
-                if n_vec <= UMBRAL_ENDPOINT:
-                    main_nodes[(x, y)] = 'endpoint'
-                elif n_vec == UMBRAL_BIFURCACION:
-                    main_nodes[(x, y)] = 'bifurcacion'
-                elif n_vec >= UMBRAL_TRIFURCACION:
-                    main_nodes[(x, y)] = 'trifurcacion'
-    return main_nodes
+    neighbors = [(-1, -1), (-1, 0), (-1, 1),
+                 (0, -1),           (0, 1),
+                 (1, -1),  (1, 0),  (1, 1)]
+    
+    ys, xs = np.where(skel)
+    for y, x in zip(ys, xs):
+        G.add_node((y, x))
+    
+    for y, x in zip(ys, xs):
+        for dy, dx in neighbors:
+            ny, nx_ = y + dy, x + dx
+            if 0 <= ny < rows and 0 <= nx_ < cols and skel[ny, nx_]:
+                G.add_edge((y, x), (ny, nx_))
+    return G
 
-def extract_paths_between_main_nodes(skel, main_nodes):
+def get_candidate_nodes(G):
     """
-    Recorre el esqueleto y extrae todos los caminos que conectan nodos principales.
-    Cada camino es una lista de píxeles [(x1,y1), (x2,y2), ...] que inicia y termina
-    en un nodo principal (o se corta si no encuentra otro).
-    
-    Retorna una lista de caminos. Cada camino es una lista de (x, y).
-    
-    Estrategia:
-      - Para cada nodo principal, hacemos un DFS/BFS para buscar otro nodo principal,
-        siguiendo únicamente píxeles del esqueleto que no sean (a priori) un nodo principal
-        (excepto al final).
-      - Marcamos como visitadas las “ramas” para no duplicar caminos.
+    Devuelve una lista de nodos candidatos a ser nodos clave (grado != 2).
+    Endpoints (grado=1) y ramificaciones (grado>=3).
     """
-    visited = set()
+    candidates = []
+    for node in G.nodes():
+        if G.degree(node) != 2:
+            candidates.append(node)
+    return candidates
+
+def extract_paths(G, candidate_set):
+    """
+    Extrae caminos (trayectorias) entre nodos candidatos en el grafo G.
+    Se hace un DFS desde cada candidato a lo largo de nodos de grado 2
+    hasta llegar a otro candidato.
+    Retorna una lista de caminos, cada uno es [(row, col), ...].
+    """
     paths = []
-    rows, cols = skel.shape
-    
-    # Convertimos main_nodes en un set para consultas rápidas
-    main_set = set(main_nodes.keys())
-    
-    def dfs_path(start, visited_global):
-        """DFS desde start hasta encontrar otro nodo principal o un callejón sin salida."""
-        stack = [(start, [start])]  # (pixel_actual, camino_actual)
-        found_paths = []
-        
-        while stack:
-            current, path = stack.pop()
-            
-            # Si current es un nodo principal y no es el inicio, cerramos el camino
-            if current != start and current in main_set:
-                found_paths.append(path)
+    visited_edges = set()
+
+    def dfs(current, previous, path):
+        if current in candidate_set and len(path) > 0:
+            return path + [current]
+        for neighbor in G.neighbors(current):
+            edge = tuple(sorted([current, neighbor]))
+            if neighbor == previous or edge in visited_edges:
                 continue
-            
-            # Explorar vecinos
-            for nx_, ny_ in get_neighbors_8(current[0], current[1], rows, cols):
-                if not skel[nx_, ny_]:
-                    continue  # no es parte del esqueleto
-                if (nx_, ny_) in path:
-                    continue  # ya en el camino actual
-                # Para evitar que arranque un DFS inverso desde un punto ya visitado en otro camino,
-                # podríamos marcar visited_global, pero hay que diseñar la lógica cuidadosamente.
-                
-                # Extendemos el camino
-                new_path = path + [(nx_, ny_)]
-                stack.append(((nx_, ny_), new_path))
-        
-        return found_paths
-    
-    # Para no duplicar caminos, llevamos un registro de pares (min_node, max_node).
-    used_pairs = set()
-    
-    for node_coord in main_set:
-        # Iniciamos un DFS para encontrar trayectos
-        result_paths = dfs_path(node_coord, visited)
-        
-        for p in result_paths:
-            # p inicia en node_coord y termina en otro nodo principal
-            start_node = p[0]
-            end_node   = p[-1]
-            # Ordenamos la tupla de nodos para no duplicar
-            pair = tuple(sorted([start_node, end_node]))
-            if pair not in used_pairs:
-                used_pairs.add(pair)
-                paths.append(p)
-    
+            visited_edges.add(edge)
+            res_path = dfs(neighbor, current, path + [current])
+            if res_path is not None:
+                return res_path
+        return None
+
+    for cand in candidate_set:
+        for neighbor in G.neighbors(cand):
+            edge = tuple(sorted([cand, neighbor]))
+            if edge in visited_edges:
+                continue
+            visited_edges.add(edge)
+            path = dfs(neighbor, cand, [cand])
+            if path is not None and path[-1] != cand:
+                paths.append(path)
     return paths
 
-def angle_between_three_points(p1, p2, p3):
+def cluster_nodes(candidates, eps):
     """
-    Dado tres puntos (x1,y1), (x2,y2), (x3,y3),
-    calcula el ángulo en 'p2' entre el vector p2->p1 y p2->p3.
-    Retorna el ángulo en grados [0..180].
+    Usa DBSCAN para agrupar nodos candidatos cercanos.
+    Devuelve:
+      - clusters: diccionario { nodo: cluster_label }
+      - centroids: diccionario { cluster_label: (row, col) }
     """
-    import math
-    
-    # Vectores
-    v1 = (p1[0] - p2[0], p1[1] - p2[1])  # p2->p1
-    v2 = (p3[0] - p2[0], p3[1] - p2[1])  # p2->p3
-    
-    # Producto punto y magnitudes
-    dot = v1[0]*v2[0] + v1[1]*v2[1]
-    mag1 = math.sqrt(v1[0]**2 + v1[1]**2)
-    mag2 = math.sqrt(v2[0]**2 + v2[1]**2)
-    if mag1*mag2 == 0:
-        return 0  # Uno de los vectores es 0 => no hay ángulo definido
-    
-    cos_angle = dot / (mag1*mag2)
-    # Evitar problemas de precisión numérica
-    cos_angle = max(min(cos_angle, 1.0), -1.0)
-    angle = np.degrees(np.arccos(cos_angle))
-    return angle
+    if not candidates:
+        return {}, {}
+    coords = np.array(candidates)
+    clustering = DBSCAN(eps=eps, min_samples=1).fit(coords)
+    labels = clustering.labels_
+    clusters = {tuple(candidates[i]): labels[i] for i in range(len(candidates))}
+    centroids = {}
+    for label in set(labels):
+        pts = coords[labels == label]
+        centroid = tuple(np.mean(pts, axis=0).astype(int))
+        centroids[label] = centroid
+    return clusters, centroids
 
-def insert_curvature_nodes(path, main_nodes, angle_threshold=UMBRAL_CURVATURA):
+def classify_node(degree):
     """
-    Dado un camino de píxeles (path) que inicia y termina en nodos principales,
-    inserta nodos intermedios cuando la curvatura (cambio de ángulo) supere
-    angle_threshold.
-    
-    Retorna la lista de nodos (x,y) resultantes. El primero y último
-    son los nodos principales originales. Entre ellos se insertan
-    nodos intermedios en las curvas.
+    Clasifica el nodo según su número de ramas (degree).
     """
-    if len(path) < 3:
-        return path  # no hay espacio para medir ángulos
-    
-    # El primer y último pixel son nodos principales
-    final_nodes = [path[0]]
-    
-    for i in range(1, len(path)-1):
-        p_prev = path[i-1]
-        p_curr = path[i]
-        p_next = path[i+1]
-        
-        # Si p_curr es un nodo principal, lo agregamos de todos modos
-        if p_curr in main_nodes and p_curr not in (path[0], path[-1]):
-            final_nodes.append(p_curr)
-            continue
-        
-        # Calculamos el ángulo en p_curr
-        ang = angle_between_three_points(p_prev, p_curr, p_next)
-        if ang <= 180.0 - angle_threshold:
-            # Significa que hay una "curva" significativa
-            final_nodes.append(p_curr)
-        # Si no supera el umbral, seguimos de largo
-    
-    final_nodes.append(path[-1])
-    return final_nodes
+    if degree == 1:
+        return "extremo"
+    elif degree == 2:
+        return "bifurcacion"
+    elif degree == 3:
+        return "bifurcacion"
+    else:
+        return "trifurcacion"
 
-def build_graph_with_curvature(skel, angle_threshold=UMBRAL_CURVATURA):
+def process_image(image_path):
     """
-    Construye un grafo donde:
-      - Nodos principales: endpoints, bifurcaciones, trifurcaciones
-      - Se conectan trayectos. A lo largo de cada trayecto, se insertan
-        nodos intermedios en curvas que superen el umbral.
-    
-    Retorna:
-      nodes_list: [{id, x, y, type}, ...]
-      edges_list: [(id_n1, id_n2), ...]
+    Procesa una imagen: esqueletiza, extrae caminos, fusiona candidatos con DBSCAN,
+    aplica RDP, construye el grafo con nodos intermedios y genera la visualización.
+    Retorna (grafo_dict, vis_img).
     """
-    main_nodes_dict = detect_main_nodes(skel)  # (x,y)-> 'endpoint'/'bifurcacion'/'trifurcacion'
-    paths = extract_paths_between_main_nodes(skel, main_nodes_dict)
-    
-    # Para construir el grafo final
-    nodes_list = []
-    edges_list = []
-    
-    # Mapeo (x,y) -> id, para no duplicar nodos
-    node_id_counter = 0
-    coord_to_id = {}
-    
-    def add_node(coord, node_type):
-        nonlocal node_id_counter
-        if coord not in coord_to_id:
-            coord_to_id[coord] = node_id_counter
-            nodes_list.append({
-                'id': node_id_counter,
-                'x': float(coord[0]),
-                'y': float(coord[1]),
-                'type': node_type
-            })
-            node_id_counter += 1
-        else:
-            # Si ya existe, podríamos querer “ascender” su tipo si ahora descubrimos que es un principal
-            existing_id = coord_to_id[coord]
-            # Buscamos en nodes_list
-            for nd in nodes_list:
-                if nd['id'] == existing_id:
-                    # Si era intermedio y ahora sabemos que es endpoint/bif/trif => actualizar
-                    if nd['type'] == 'intermedio' and node_type != 'intermedio':
-                        nd['type'] = node_type
-                    break
-    
-    # 1) Recorremos cada camino, insertamos nodos intermedios por curvatura
+    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        print(f"Error al leer {image_path}")
+        return None, None
+
+    _, bin_img = cv2.threshold(img, 127, 1, cv2.THRESH_BINARY)
+    skel = skeletonize(bin_img).astype(np.uint8)
+    G = build_skeleton_graph(skel)
+    candidate_nodes = get_candidate_nodes(G)
+    candidate_set = set(candidate_nodes)
+    paths = extract_paths(G, candidate_set)
+
+    clusters, centroids = cluster_nodes(candidate_nodes, EPSILON_DBSCAN)
+    candidate_to_merged = {node: centroids[clusters[node]] for node in candidate_nodes}
+
+    merged_nodes = {c: {"id": None, "row": c[0], "col": c[1], "type": None, "degree": 0} for c in centroids.values()}
+    intermediate_nodes = {}
+    connection_count = {c: 0 for c in merged_nodes}
+    edges = []
+
     for path in paths:
-        # Insertar nodos por curvatura
-        new_path_nodes = insert_curvature_nodes(path, main_nodes_dict, angle_threshold)
-        
-        # 2) Añadir estos nodos al grafo
-        #    El tipo vendrá de main_nodes_dict si es principal, sino 'intermedio'
-        typed_nodes = []
-        for c in new_path_nodes:
-            node_type = main_nodes_dict.get(c, 'intermedio')  # si no está, es intermedio
-            add_node(c, node_type)
-            typed_nodes.append(c)
-        
-        # 3) Conectar en edges_list en orden
-        for i in range(len(typed_nodes)-1):
-            c1 = typed_nodes[i]
-            c2 = typed_nodes[i+1]
-            id1 = coord_to_id[c1]
-            id2 = coord_to_id[c2]
-            edge = tuple(sorted((id1, id2)))
-            if edge not in edges_list:
-                edges_list.append(edge)
-    
-    return nodes_list, edges_list
+        if len(path) < 2:
+            continue
+        start_coord = candidate_to_merged.get(path[0], path[0])
+        end_coord   = candidate_to_merged.get(path[-1], path[-1])
+        if start_coord == end_coord:
+            continue
+        pts = [[p[0], p[1]] for p in path]
+        simplified = rdp(pts, RDP_EPSILON)
+        inter_coords = [tuple(p) for p in simplified[1:-1]]
+        edges.append({
+            "source": start_coord,
+            "target": end_coord,
+            "intermediate_pixels": inter_coords
+        })
+        connection_count[start_coord] += 1
+        connection_count[end_coord]   += 1
 
-def process_image(path, output_json_dir, output_img_dir):
-    """Procesa la imagen, construye el grafo y genera JSON + imagen coloreada."""
-    # 1) Cargar y esqueletizar
-    bin_img = load_image(path)
-    skel = skeletonize_image(bin_img)
-    
-    # 2) Construir grafo con curvatura
-    nodes_list, edges_list = build_graph_with_curvature(skel, UMBRAL_CURVATURA)
-    
-    # 3) Extraer listas de nodos por tipo
-    endpoints = []
-    bifurcaciones = []
-    trifurcaciones = []
-    intermedios = []
-    for nd in nodes_list:
-        if nd['type'] == 'endpoint':
-            endpoints.append(nd['id'])
-        elif nd['type'] == 'bifurcacion':
-            bifurcaciones.append(nd['id'])
-        elif nd['type'] == 'trifurcacion':
-            trifurcaciones.append(nd['id'])
+    nodes_list = []
+    id_counter = 0
+    for coord, data in merged_nodes.items():
+        deg = connection_count.get(coord, 0)
+        data["id"] = id_counter
+        data["type"] = classify_node(deg)
+        data["degree"] = deg
+        nodes_list.append({
+            "id": id_counter,
+            "row": int(data["row"]),
+            "col": int(data["col"]),
+            "type": data["type"]
+        })
+        merged_nodes[coord] = data
+        id_counter += 1
+
+    def get_or_create_intermediate_node(pt):
+        if pt not in intermediate_nodes:
+            intermediate_nodes[pt] = {
+                "id": None,
+                "row": pt[0],
+                "col": pt[1],
+                "type": "intermedio"
+            }
+        return intermediate_nodes[pt]
+
+    final_edges = []
+    for e in edges:
+        src_coord = e["source"]
+        tgt_coord = e["target"]
+        inter_coords = e["intermediate_pixels"]
+        chain = [src_coord] + inter_coords + [tgt_coord]
+        chain_ids = []
+        for i, pt in enumerate(chain):
+            if i == 0:
+                chain_ids.append(merged_nodes[pt]["id"])
+            elif i == len(chain) - 1:
+                chain_ids.append(merged_nodes[pt]["id"])
+            else:
+                node_data = get_or_create_intermediate_node(pt)
+                chain_ids.append(None)
+        for i, pt in enumerate(chain):
+            if i in (0, len(chain)-1):
+                continue
+            if intermediate_nodes[pt]["id"] is None:
+                intermediate_nodes[pt]["id"] = id_counter
+                nodes_list.append({
+                    "id": id_counter,
+                    "row": pt[0],
+                    "col": pt[1],
+                    "type": "intermedio"
+                })
+                chain_ids[i] = id_counter
+                id_counter += 1
+            else:
+                chain_ids[i] = intermediate_nodes[pt]["id"]
+        for i in range(len(chain_ids)-1):
+            final_edges.append({
+                "source": chain_ids[i],
+                "target": chain_ids[i+1]
+            })
+
+    grafo_dict = {
+        "nodes": nodes_list,
+        "edges": final_edges
+    }
+
+    vis_img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    for edge in final_edges:
+        src_node = next((n for n in nodes_list if n["id"] == edge["source"]), None)
+        tgt_node = next((n for n in nodes_list if n["id"] == edge["target"]), None)
+        if src_node and tgt_node:
+            pt1 = (src_node["col"], src_node["row"])
+            pt2 = (tgt_node["col"], tgt_node["row"])
+            cv2.line(vis_img, pt1, pt2, (0,255,255), 1)
+    for node in nodes_list:
+        center = (node["col"], node["row"])
+        if node["type"] == "extremo":
+            color = (0,255,0)
+        elif node["type"] == "bifurcacion":
+            color = (0,0,255)
+        elif node["type"] == "trifurcacion":
+            color = (255,0,0)
         else:
-            intermedios.append(nd['id'])
-    
-    # 4) Armar JSON
-    edges_json = [{'source': s, 'target': t} for (s, t) in edges_list]
-    graph_data = {
-        'nodes': nodes_list,
-        'endpoints': endpoints,
-        'bifurcaciones': bifurcaciones,
-        'trifurcaciones': trifurcaciones,
-        'intermedios': intermedios,
-        'edges': edges_json
-    }
-    base_name = os.path.splitext(os.path.basename(path))[0]
-    json_path = os.path.join(output_json_dir, base_name + ".json")
-    with open(json_path, 'w') as f:
-        json.dump(graph_data, f, indent=2)
-    
-    # 5) Generar imagen coloreada
-    out_img_path = os.path.join(output_img_dir, base_name + "_colored.png")
-    generate_colored_image(skel, nodes_list, edges_list, out_img_path)
+            color = (128,128,128)
+        cv2.circle(vis_img, center, 3, color, -1)
 
-def generate_colored_image(skel, nodes_list, edges_list, out_path):
+    return grafo_dict, vis_img
+
+def save_results(grafo_dict, vis_img, base_name):
     """
-    Crea una imagen RGB con:
-      - Aristas en amarillo
-      - endpoint en verde
-      - bifurcacion en rojo
-      - trifurcacion en azul
-      - intermedio en gris
+    Guarda el grafo en JSON y la imagen de visualización.
+    Se añade un conversor para transformar np.int64 a int nativo.
     """
-    rows, cols = skel.shape
-    # Convertimos el esqueleto a 3 canales
-    skel_rgb = np.dstack([skel*255, skel*255, skel*255]).astype(np.uint8)
+    json_path = os.path.join(OUTPUT_JSON_DIR, base_name + ".json")
+    with open(json_path, "w") as f:
+        json.dump(grafo_dict, f, indent=2, default=lambda o: int(o) if isinstance(o, np.int64) else o)
     
-    # Colores en BGR (OpenCV)
-    color_map = {
-        'endpoint': (0, 255, 0),       # verde
-        'bifurcacion': (0, 0, 255),    # rojo
-        'trifurcacion': (255, 0, 0),   # azul
-        'intermedio': (128, 128, 128)  # gris
-    }
-    color_edges = (0, 255, 255)       # amarillo
-    
-    # Diccionario para acceder rápido a (row, col)
-    node_dict = {n['id']: (int(n['x']), int(n['y']), n['type']) for n in nodes_list}
-    
-    import cv2
-    
-    # Dibujamos aristas
-    for (n1, n2) in edges_list:
-        x1, y1, _ = node_dict[n1]
-        x2, y2, _ = node_dict[n2]
-        cv2.line(skel_rgb, (y1, x1), (y2, x2), color_edges, 1)
-    
-    # Dibujamos nodos
-    for nd in nodes_list:
-        nid = nd['id']
-        x_, y_ = int(nd['x']), int(nd['y'])
-        t_ = nd['type']
-        c_ = color_map.get(t_, (255, 255, 255))
-        cv2.circle(skel_rgb, (y_, x_), 2, c_, -1)
-    
-    cv2.imwrite(out_path, skel_rgb)
+    img_path = os.path.join(OUTPUT_IMG_DIR, base_name + ".png")
+    cv2.imwrite(img_path, vis_img)
+    print(f"Procesado {base_name}: JSON y PNG guardados.")
 
 def main():
-    input_dir = "datos/etiquetas"
-    output_json_dir = "salida/json"
-    output_img_dir = "salida/imagenes"
-    
-    os.makedirs(output_json_dir, exist_ok=True)
-    os.makedirs(output_img_dir, exist_ok=True)
-    
-    for file_name in os.listdir(input_dir):
-        if file_name.lower().endswith((".pgm", ".png", ".jpg", ".jpeg")):
-            path = os.path.join(input_dir, file_name)
-            print("Procesando:", path)
-            try:
-                process_image(path, output_json_dir, output_img_dir)
-            except Exception as e:
-                print(f"Error procesando {path}: {e}")
+    for file in os.listdir(INPUT_DIR):
+        if file.lower().endswith(".pgm"):
+            image_path = os.path.join(INPUT_DIR, file)
+            print(f"Procesando {file}...")
+            grafo_dict, vis_img = process_image(image_path)
+            if grafo_dict is not None:
+                base_name = os.path.splitext(file)[0]
+                save_results(grafo_dict, vis_img, base_name)
 
 if __name__ == "__main__":
     main()
