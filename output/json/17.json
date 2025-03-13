@@ -1,0 +1,397 @@
+{
+    "nodes": [
+        {
+            "id": 0,
+            "row": 53,
+            "col": 5,
+            "type": "extremo"
+        },
+        {
+            "id": 1,
+            "row": 53,
+            "col": 186,
+            "type": "extremo"
+        },
+        {
+            "id": 2,
+            "row": 163,
+            "col": 140,
+            "type": "extremo"
+        },
+        {
+            "id": 3,
+            "row": 254,
+            "col": 199,
+            "type": "extremo"
+        },
+        {
+            "id": 4,
+            "row": 272,
+            "col": 7,
+            "type": "extremo"
+        },
+        {
+            "id": 5,
+            "row": 273,
+            "col": 173,
+            "type": "extremo"
+        },
+        {
+            "id": 6,
+            "row": 275,
+            "col": 28,
+            "type": "extremo"
+        },
+        {
+            "id": 7,
+            "row": 31,
+            "col": 80,
+            "type": "bifurcacion"
+        },
+        {
+            "id": 8,
+            "row": 37,
+            "col": 116,
+            "type": "trifurcacion"
+        },
+        {
+            "id": 9,
+            "row": 53,
+            "col": 11,
+            "type": "trifurcacion"
+        },
+        {
+            "id": 10,
+            "row": 121,
+            "col": 74,
+            "type": "trifurcacion"
+        },
+        {
+            "id": 11,
+            "row": 243,
+            "col": 171,
+            "type": "trifurcacion"
+        },
+        {
+            "id": 12,
+            "row": 252,
+            "col": 40,
+            "type": "trifurcacion"
+        },
+        {
+            "id": 13,
+            "row": 39,
+            "col": 160,
+            "type": "intermedio"
+        },
+        {
+            "id": 14,
+            "row": 126,
+            "col": 128,
+            "type": "intermedio"
+        },
+        {
+            "id": 15,
+            "row": 89,
+            "col": 129,
+            "type": "intermedio"
+        },
+        {
+            "id": 16,
+            "row": 63,
+            "col": 118,
+            "type": "intermedio"
+        },
+        {
+            "id": 17,
+            "row": 252,
+            "col": 193,
+            "type": "intermedio"
+        },
+        {
+            "id": 18,
+            "row": 244,
+            "col": 186,
+            "type": "intermedio"
+        },
+        {
+            "id": 19,
+            "row": 261,
+            "col": 175,
+            "type": "intermedio"
+        },
+        {
+            "id": 20,
+            "row": 267,
+            "col": 35,
+            "type": "intermedio"
+        },
+        {
+            "id": 21,
+            "row": 23,
+            "col": 87,
+            "type": "intermedio"
+        },
+        {
+            "id": 22,
+            "row": 16,
+            "col": 100,
+            "type": "intermedio"
+        },
+        {
+            "id": 23,
+            "row": 16,
+            "col": 106,
+            "type": "intermedio"
+        },
+        {
+            "id": 24,
+            "row": 25,
+            "col": 114,
+            "type": "intermedio"
+        },
+        {
+            "id": 25,
+            "row": 34,
+            "col": 85,
+            "type": "intermedio"
+        },
+        {
+            "id": 26,
+            "row": 73,
+            "col": 22,
+            "type": "intermedio"
+        },
+        {
+            "id": 27,
+            "row": 94,
+            "col": 39,
+            "type": "intermedio"
+        },
+        {
+            "id": 28,
+            "row": 120,
+            "col": 76,
+            "type": "intermedio"
+        },
+        {
+            "id": 29,
+            "row": 122,
+            "col": 72,
+            "type": "intermedio"
+        },
+        {
+            "id": 30,
+            "row": 150,
+            "col": 75,
+            "type": "intermedio"
+        },
+        {
+            "id": 31,
+            "row": 195,
+            "col": 69,
+            "type": "intermedio"
+        },
+        {
+            "id": 32,
+            "row": 231,
+            "col": 55,
+            "type": "intermedio"
+        },
+        {
+            "id": 33,
+            "row": 236,
+            "col": 153,
+            "type": "intermedio"
+        },
+        {
+            "id": 34,
+            "row": 219,
+            "col": 149,
+            "type": "intermedio"
+        },
+        {
+            "id": 35,
+            "row": 191,
+            "col": 119,
+            "type": "intermedio"
+        }
+    ],
+    "edges": [
+        {
+            "source": 0,
+            "target": 9,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 1,
+            "target": 13,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 13,
+            "target": 8,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 2,
+            "target": 14,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 14,
+            "target": 15,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 15,
+            "target": 16,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 16,
+            "target": 8,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 3,
+            "target": 17,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 17,
+            "target": 18,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 18,
+            "target": 11,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 4,
+            "target": 12,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 5,
+            "target": 19,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 19,
+            "target": 11,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 6,
+            "target": 20,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 20,
+            "target": 12,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 7,
+            "target": 21,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 21,
+            "target": 22,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 22,
+            "target": 23,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 23,
+            "target": 24,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 24,
+            "target": 8,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 7,
+            "target": 9,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 7,
+            "target": 25,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 25,
+            "target": 8,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 9,
+            "target": 26,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 26,
+            "target": 27,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 27,
+            "target": 28,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 28,
+            "target": 29,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 29,
+            "target": 30,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 30,
+            "target": 31,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 31,
+            "target": 32,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 32,
+            "target": 12,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 11,
+            "target": 33,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 33,
+            "target": 34,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 34,
+            "target": 35,
+            "intermediate_pixels": []
+        },
+        {
+            "source": 35,
+            "target": 28,
+            "intermediate_pixels": []
+        }
+    ]
+}
